@@ -272,14 +272,15 @@
 
   // ---------- comments page ----------
   function renderComment(node, depth) {
+    const indent = depth > 0 ? '16px' : '0';
     if (node.kind === 'more') {
       if (!node.data || node.data.count === 0) return null;
-      return el('div', { class: 'orr-more', style: 'margin-left:' + depth * 16 + 'px' },
+      return el('div', { class: 'orr-more', style: 'margin-left:' + indent },
         node.data.count + ' more replies (reload this thread\u2019s permalink to load them)');
     }
     if (node.kind !== 't1') return null;
     const c = node.data;
-    const wrap = el('div', { class: 'orr-comment', style: 'margin-left:' + Math.min(depth, 12) * 16 + 'px' });
+    const wrap = el('div', { class: 'orr-comment', style: 'margin-left:' + indent });
     const head = el('div', {
       class: 'orr-comment-head',
       onclick: () => wrap.classList.toggle('orr-collapsed'),
