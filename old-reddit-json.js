@@ -271,12 +271,14 @@
   }
 
   // ---------- comments page ----------
-  function renderComment(node, depth) {
+  function renderComment(node, depth, postPermalink) {
     const indent = depth > 0 ? '16px' : '0';
     if (node.kind === 'more') {
       if (!node.data || node.data.count === 0) return null;
+      const parentId = (node.data.parent_id || '').replace(/^t1_/, '');
+      const href = 'https://www.reddit.com' + postPermalink + parentId + '/';
       return el('div', { class: 'orr-more', style: 'margin-left:' + indent },
-        node.data.count + ' more replies (reload this thread\u2019s permalink to load them)');
+        el('a', { href, class: 'orr-more-link' }, node.data.count + ' more replies'));
     }
     if (node.kind !== 't1') return null;
     const c = node.data;
@@ -299,7 +301,7 @@
     if (c.replies && c.replies.data && c.replies.data.children) {
       const kids = el('div', { class: 'orr-comment-children' });
       for (const child of c.replies.data.children) {
-        const r = renderComment(child, depth + 1);
+        const r = renderComment(child, depth + 1, postPermalink);
         if (r) kids.appendChild(r);
       }
       wrap.appendChild(kids);
@@ -340,7 +342,7 @@
     const commentsList = el('div', { class: 'orr-comments-list' });
     const topChildren = (data[1].data && data[1].data.children) || [];
     for (const child of topChildren) {
-      const r = renderComment(child, 0);
+      const r = renderComment(child, 0, post.permalink);
       if (r) commentsList.appendChild(r);
     }
     root.appendChild(commentsList);
@@ -425,6 +427,7 @@
       .orr-comment-body p { margin:0 0 8px; }
       .orr-collapsed .orr-comment-body, .orr-collapsed .orr-comment-children { display:none; }
       .orr-more { color:#888; font-size:12px; margin-top:6px; }
+      .orr-more-link { color:#888 !important; }
       .orr-commentrow .orr-comment-context { color:#888; font-size:11.5px; margin-bottom:4px; }
     `;
     document.documentElement.appendChild(el('style', { html: css }));
