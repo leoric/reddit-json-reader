@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Reddit: Old-style JSON Reader
 // @namespace    https://leoric.local/userscripts
-// @version      1.0.0
+// @version      1.0.3
 // @description  Re-renders www.reddit.com from the .json API in an old-reddit-style layout, but keeps images/video at new-reddit size
 // @author       leoric
 // @match        https://www.reddit.com/*
@@ -271,7 +271,23 @@
   }
 
   // ---------- comments page ----------
-  function renderComment(node, depth, postPermalink) {
+  function commentHasChildren(node) {
+    return !!(node.kind === 't1' && node.data.replies && node.data.replies.data &&
+      node.data.replies.data.children && node.data.replies.data.children.length > 0);
+  }
+
+  function renderCommentSiblings(children, depth, postPermalink, parentEl) {
+    let alt = false;
+    let prevWasChildless = false;
+    for (const child of children) {
+      if (prevWasChildless) alt = !alt;
+      const r = renderComment(child, depth, postPermalink, alt);
+      if (r) parentEl.appendChild(r);
+      prevWasChildless = !commentHasChildren(child);
+    }
+  }
+
+  function renderComment(node, depth, postPermalink, alt) {
     const indent = depth > 0 ? '16px' : '0';
     if (node.kind === 'more') {
       if (!node.data || node.data.count === 0) return null;
@@ -282,7 +298,7 @@
     }
     if (node.kind !== 't1') return null;
     const c = node.data;
-    const wrap = el('div', { class: 'orr-comment', style: 'margin-left:' + indent });
+    const wrap = el('div', { class: 'orr-comment' + (alt ? ' orr-comment-alt' : ''), style: 'margin-left:' + indent });
     const head = el('div', {
       class: 'orr-comment-head',
       onclick: () => wrap.classList.toggle('orr-collapsed'),
@@ -300,10 +316,7 @@
 
     if (c.replies && c.replies.data && c.replies.data.children) {
       const kids = el('div', { class: 'orr-comment-children' });
-      for (const child of c.replies.data.children) {
-        const r = renderComment(child, depth + 1, postPermalink);
-        if (r) kids.appendChild(r);
-      }
+      renderCommentSiblings(c.replies.data.children, depth + 1, postPermalink, kids);
       wrap.appendChild(kids);
     }
     return wrap;
@@ -341,10 +354,7 @@
 
     const commentsList = el('div', { class: 'orr-comments-list' });
     const topChildren = (data[1].data && data[1].data.children) || [];
-    for (const child of topChildren) {
-      const r = renderComment(child, 0, post.permalink);
-      if (r) commentsList.appendChild(r);
-    }
+    renderCommentSiblings(topChildren, 0, post.permalink, commentsList);
     root.appendChild(commentsList);
   }
 
@@ -420,7 +430,8 @@
       .orr-selftext p { margin:0 0 10px; }
       .orr-comments-count { padding:10px 12px; color:#555; font-weight:bold; border-bottom:1px solid #edeff1; }
       .orr-comments-list { padding:10px 12px; }
-      .orr-comment { border-left:2px solid #edeff1; padding-left:10px; margin-top:10px; }
+      .orr-comment { border-left:2px solid #edeff1; padding:4px 8px 4px 10px; margin-top:10px; }
+      .orr-comment-alt { background:#f6f7f8; }
       .orr-comment-head { cursor:pointer; color:#888; font-size:11.5px; user-select:none; }
       .orr-comment-head .orr-user { color:#336699 !important; font-weight:bold; }
       .orr-comment-body { margin:4px 0 2px; }
