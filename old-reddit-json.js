@@ -53,8 +53,13 @@
   hideStyle.id = 'orr-hide';
   hideStyle.textContent = `
     body > :not(#orr-root){ display:none !important; }
-    html, body { background:#fff; }
-    @media (prefers-color-scheme: dark) { html, body { background:#1a1a1b; } }
+    html, body {
+      overflow: visible !important;
+      height: auto !important;
+      max-height: none !important;
+      min-height: 0 !important;
+      position: static !important;
+    }
   `;
   document.documentElement.appendChild(hideStyle);
 
@@ -148,6 +153,30 @@
     return best ? unescAmp(best.url) : null;
   }
 
+  // reddit's oEmbed HTML sets width/height as fixed HTML attributes, so scaling
+  // the iframe down to fit the row (via CSS width:100%) leaves height unchanged
+  // and distorts/squishes it. Read the intended aspect ratio from those
+  // attributes once, then let CSS aspect-ratio keep height proportional as the
+  // width is constrained to the available space. The oEmbed markup also often
+  // sets the iframe (or its wrapper) to position:absolute for its own
+  // responsive trick, which fights our layout - force it back to static.
+  function normalizeEmbedIframe(container) {
+    const iframe = container.querySelector('iframe');
+    if (!iframe) return;
+    const w = parseFloat(iframe.getAttribute('width'));
+    const h = parseFloat(iframe.getAttribute('height'));
+    iframe.removeAttribute('width');
+    iframe.removeAttribute('height');
+    iframe.style.position = 'static';
+    iframe.style.width = '100%';
+    iframe.style.maxWidth = '100%';
+    iframe.style.border = '0';
+    iframe.style.display = 'block';
+    iframe.style.aspectRatio = (w && h) ? (w + ' / ' + h) : '16 / 9';
+    iframe.style.height = 'auto';
+    iframe.style.maxHeight = '80vh';
+  }
+
   function renderMedia(post) {
     const src = (post.crosspost_parent_list && post.crosspost_parent_list[0]) || post;
     const wrap = el('div', { class: 'orr-media' });
@@ -181,6 +210,7 @@
 
     if (src.media && src.media.oembed && src.media.oembed.html) {
       const box = el('div', { class: 'orr-embed', html: decodeHtml(src.media.oembed.html) });
+      normalizeEmbedIframe(box);
       wrap.appendChild(box);
       return wrap;
     }
@@ -275,36 +305,15 @@
   }
 
   // ---------- comments page ----------
-  function commentHasChildren(node) {
-    return !!(node.kind === 't1' && node.data.replies && node.data.replies.data &&
-      node.data.replies.data.children && node.data.replies.data.children.length > 0);
-  }
-
-  function renderCommentSiblings(children, depth, postPermalink, parentEl) {
-    let childlessToggle = false;
-    for (const child of children) {
-      let alt = false;
-      if (!commentHasChildren(child)) {
-        alt = childlessToggle;
-        childlessToggle = !childlessToggle;
-      }
-      const r = renderComment(child, depth, postPermalink, alt);
-      if (r) parentEl.appendChild(r);
-    }
-  }
-
-  function renderComment(node, depth, postPermalink, alt) {
-    const indent = depth > 0 ? '16px' : '0';
+  function renderComment(node, depth) {
     if (node.kind === 'more') {
       if (!node.data || node.data.count === 0) return null;
-      const parentId = (node.data.parent_id || '').replace(/^t1_/, '');
-      const href = 'https://www.reddit.com' + postPermalink + parentId + '/';
-      return el('div', { class: 'orr-more', style: 'margin-left:' + indent },
-        el('a', { href, class: 'orr-more-link' }, node.data.count + ' more replies'));
+      return el('div', { class: 'orr-more', style: 'margin-left:' + depth * 16 + 'px' },
+        node.data.count + ' more replies (reload this thread\u2019s permalink to load them)');
     }
     if (node.kind !== 't1') return null;
     const c = node.data;
-    const wrap = el('div', { class: 'orr-comment' + (alt ? ' orr-comment-alt' : ''), style: 'margin-left:' + indent });
+    const wrap = el('div', { class: 'orr-comment', style: 'margin-left:' + Math.min(depth, 12) * 16 + 'px' });
     const head = el('div', {
       class: 'orr-comment-head',
       onclick: () => wrap.classList.toggle('orr-collapsed'),
@@ -322,7 +331,10 @@
 
     if (c.replies && c.replies.data && c.replies.data.children) {
       const kids = el('div', { class: 'orr-comment-children' });
-      renderCommentSiblings(c.replies.data.children, depth + 1, postPermalink, kids);
+      for (const child of c.replies.data.children) {
+        const r = renderComment(child, depth + 1);
+        if (r) kids.appendChild(r);
+      }
       wrap.appendChild(kids);
     }
     return wrap;
@@ -360,7 +372,10 @@
 
     const commentsList = el('div', { class: 'orr-comments-list' });
     const topChildren = (data[1].data && data[1].data.children) || [];
-    renderCommentSiblings(topChildren, 0, post.permalink, commentsList);
+    for (const child of topChildren) {
+      const r = renderComment(child, 0);
+      if (r) commentsList.appendChild(r);
+    }
     root.appendChild(commentsList);
   }
 
@@ -398,72 +413,52 @@
   // ---------- CSS ----------
   function injectCss() {
     const css = `
-      #orr-root {
-        all: initial; display:block; font: 13px/1.4 Verdana, Arial, sans-serif;
-        max-width: 1024px; margin: 0 auto;
-        color:var(--orr-fg); background:var(--orr-bg);
-        --orr-bg:#fff; --orr-fg:#1c1c1c; --orr-fg-secondary:#555; --orr-title:#222;
-        --orr-link:#0b6b9c; --orr-user:#336699;
-        --orr-border:#edeff1; --orr-hover-bg:#f8f9fa; --orr-panel-bg:#f8f9fa; --orr-alt-bg:#f6f7f8;
-        --orr-muted:#888; --orr-faint:#aaa;
-        --orr-flair-bg:#eef6ff; --orr-flair-fg:#369; --orr-danger:#e5001c; --orr-header-bg:#ff4500;
-      }
-      @media (prefers-color-scheme: dark) {
-        #orr-root {
-          --orr-bg:#1a1a1b; --orr-fg:#d7dadc; --orr-fg-secondary:#a3a5a7; --orr-title:#d7dadc;
-          --orr-link:#6db6e8; --orr-user:#7fb2e5;
-          --orr-border:#343536; --orr-hover-bg:#222325; --orr-panel-bg:#1e1f20; --orr-alt-bg:#242527;
-          --orr-muted:#a3a5a7; --orr-faint:#7a7a7a;
-          --orr-flair-bg:#1e2a35; --orr-flair-fg:#8ecbff; --orr-danger:#ff6a6a; --orr-header-bg:#ff4500;
-        }
-      }
+      #orr-root { all: initial; display:block; font: 13px/1.4 Verdana, Arial, sans-serif; color:#1c1c1c; background:#fff; max-width: 1024px; margin: 0 auto; }
       #orr-root * { box-sizing: border-box; font-family: inherit; }
-      #orr-root a { color:var(--orr-link); text-decoration:none; }
+      #orr-root a { color:#0b6b9c; text-decoration:none; }
       #orr-root a:hover { text-decoration:underline; }
-      .orr-header { display:flex; align-items:center; gap:16px; background:var(--orr-header-bg); padding:8px 12px; }
+      .orr-header { display:flex; align-items:center; gap:16px; background:#ff4500; padding:8px 12px; }
       .orr-brand { color:#fff !important; font-weight:bold; font-size:18px; letter-spacing:-0.5px; }
       .orr-tabs { display:flex; gap:10px; }
       .orr-tab, .orr-tabs a { color:#fff !important; opacity:0.85; text-transform:capitalize; }
       .orr-tab-active { opacity:1; font-weight:bold; text-decoration:underline; }
       .orr-escape { margin-left:auto; color:#fff !important; opacity:0.75; font-size:11px; }
-      .orr-list { border-top:1px solid var(--orr-border); }
-      .orr-row { display:flex; gap:10px; padding:10px 12px; border-bottom:1px solid var(--orr-border); }
-      .orr-row:hover { background:var(--orr-hover-bg); }
+      .orr-list { border-top:1px solid #edeff1; }
+      .orr-row { display:flex; gap:10px; padding:10px 12px; border-bottom:1px solid #edeff1; }
+      .orr-row:hover { background:#f8f9fa; }
       .orr-votecol { width:40px; flex:0 0 40px; text-align:center; padding-top:2px; }
-      .orr-score { color:var(--orr-fg-secondary); font-weight:bold; font-size:12px; }
+      .orr-score { color:#878a8c; font-weight:bold; font-size:12px; }
       .orr-body { flex:1; min-width:0; }
-      .orr-title { font-size:16px; color:var(--orr-title); }
+      .orr-title { font-size:16px; color:#222; }
       .orr-title-big { font-size:20px; }
-      .orr-domain { color:var(--orr-muted); font-size:12px; margin-left:4px; }
-      .orr-flair { display:inline-block; background:var(--orr-flair-bg); color:var(--orr-flair-fg); border-radius:3px; padding:1px 5px; font-size:11px; margin-right:6px; }
-      .orr-nsfw { color:var(--orr-danger); border:1px solid var(--orr-danger); font-size:10px; padding:0 3px; margin-left:6px; border-radius:2px; }
-      .orr-meta { color:var(--orr-muted); font-size:11.5px; margin-top:3px; }
-      .orr-meta a { color:var(--orr-muted) !important; }
-      .orr-comments { color:var(--orr-link) !important; }
-      .orr-media { margin-top:8px; }
-      .orr-img, .orr-video { max-width: 640px; width:100%; height:auto; border-radius:3px; display:block; }
+      .orr-domain { color:#888; font-size:12px; margin-left:4px; }
+      .orr-flair { display:inline-block; background:#eef6ff; color:#369; border-radius:3px; padding:1px 5px; font-size:11px; margin-right:6px; }
+      .orr-nsfw { color:#e5001c; border:1px solid #e5001c; font-size:10px; padding:0 3px; margin-left:6px; border-radius:2px; }
+      .orr-meta { color:#888; font-size:11.5px; margin-top:3px; }
+      .orr-meta a { color:#888 !important; }
+      .orr-comments { color:#0b6b9c !important; }
+      .orr-media { margin-top:8px; max-width: 100%; }
+      .orr-img, .orr-video { max-width: 100%; max-height: 80vh; width:auto; height:auto; border-radius:3px; display:block; }
       .orr-thumb { max-width:200px; border-radius:3px; display:block; }
       .orr-gallery { display:flex; flex-wrap:wrap; gap:6px; }
       .orr-gallery-img { max-width:300px; max-height:300px; border-radius:3px; }
-      .orr-embed { max-width:640px; }
-      .orr-embed iframe { max-width:100%; }
-      .orr-note { color:var(--orr-faint); font-size:11px; margin-top:2px; }
+      .orr-embed { max-width:100%; }
+      .orr-embed iframe { max-width:100%; position: static !important; }
+      .orr-note { color:#aaa; font-size:11px; margin-top:2px; }
       .orr-nav { padding:14px; text-align:center; }
-      .orr-postbox { display:flex; gap:10px; padding:14px 12px; border-bottom:2px solid var(--orr-header-bg); }
-      .orr-selftext { margin-top:10px; padding:10px; background:var(--orr-panel-bg); border:1px solid var(--orr-border); border-radius:4px; max-width:720px; }
+      .orr-postbox { display:flex; gap:10px; padding:14px 12px; border-bottom:2px solid #ff4500; }
+      .orr-selftext { margin-top:10px; padding:10px; background:#f8f9fa; border:1px solid #edeff1; border-radius:4px; max-width:720px; }
       .orr-selftext p { margin:0 0 10px; }
-      .orr-comments-count { padding:10px 12px; color:var(--orr-fg-secondary); font-weight:bold; border-bottom:1px solid var(--orr-border); }
+      .orr-comments-count { padding:10px 12px; color:#555; font-weight:bold; border-bottom:1px solid #edeff1; }
       .orr-comments-list { padding:10px 12px; }
-      .orr-comment { border-left:2px solid var(--orr-border); padding:4px 8px 4px 10px; margin-top:10px; }
-      .orr-comment-alt { background:var(--orr-alt-bg); }
-      .orr-comment-head { cursor:pointer; color:var(--orr-muted); font-size:11.5px; user-select:none; }
-      .orr-comment-head .orr-user { color:var(--orr-user) !important; font-weight:bold; }
+      .orr-comment { border-left:2px solid #edeff1; padding-left:10px; margin-top:10px; }
+      .orr-comment-head { cursor:pointer; color:#888; font-size:11.5px; user-select:none; }
+      .orr-comment-head .orr-user { color:#336699 !important; font-weight:bold; }
       .orr-comment-body { margin:4px 0 2px; }
       .orr-comment-body p { margin:0 0 8px; }
       .orr-collapsed .orr-comment-body, .orr-collapsed .orr-comment-children { display:none; }
-      .orr-more { color:var(--orr-muted); font-size:12px; margin-top:6px; }
-      .orr-more-link { color:var(--orr-muted) !important; }
-      .orr-commentrow .orr-comment-context { color:var(--orr-muted); font-size:11.5px; margin-bottom:4px; }
+      .orr-more { color:#888; font-size:12px; margin-top:6px; }
+      .orr-commentrow .orr-comment-context { color:#888; font-size:11.5px; margin-bottom:4px; }
     `;
     document.documentElement.appendChild(el('style', { html: css }));
   }
